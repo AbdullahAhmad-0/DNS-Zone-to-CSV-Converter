@@ -29,22 +29,70 @@ def preprocess_and_load_zone(zone_file_path):
     with open(zone_file_path, 'r', encoding='utf-8') as f:
         lines = f.readlines()
 
+    # Scan the file dynamically to see what is missing
     has_ttl = any(line.strip().upper().startswith('$TTL') for line in lines)
     has_origin = any(line.strip().upper().startswith('$ORIGIN') for line in lines)
     has_soa = any('IN\tSOA' in line or 'IN SOA' in line or 'SOA' in line.split() for line in lines)
     has_ns = any('IN\tNS' in line or 'IN NS' in line or 'NS' in line.split() for line in lines)
 
     injected_headers = []
-    origin_domain = "maahmad.com"
-
+    
+    # 1. Ask for Origin if not in file
     if not has_origin:
+        origin_domain = input("Zone file is missing $ORIGIN. Enter origin domain (e.g., maahmad.com): ").strip().strip('.')
         injected_headers.append(f"$ORIGIN {origin_domain}.\n")
+    else:
+        # Extract origin from file dynamically to use as placeholder helper context
+        origin_domain = "domain.com"
+        for line in lines:
+            if line.strip().upper().startswith('$ORIGIN'):
+                parts = line.split()
+                if len(parts) >= 2:
+                    origin_domain = parts[1].strip('.')
+
+    # 2. Ask for TTL if not in file
     if not has_ttl:
-        injected_headers.append("$TTL 3600\n")
+        ttl_input = input("Zone file is missing default TTL. Enter fallback value [3600]: ").strip()
+        if not ttl_input:
+            ttl_input = "3600"
+        injected_headers.append(f"$TTL {ttl_input}\n")
+
+    # 3. Ask for SOA components if not in file
     if not has_soa:
-        injected_headers.append(f"@   IN  SOA ns1.{origin_domain}. postmaster.{origin_domain}. ( 2026101201 3600 1800 604800 86400 )\n")
+        print("Zone file is missing an SOA record. Let's build it dynamically:")
+        ns1_val = input(f"Enter Primary Name Server [ns1.{origin_domain}]: ").strip()
+        if not ns1_val:
+            ns1_val = f"ns1.{origin_domain}"
+            
+        email_val = input(f"Enter Hostmaster Email [postmaster.{origin_domain}]: ").strip()
+        if not email_val:
+            email_val = f"postmaster.{origin_domain}"
+            
+        # Standardize periods for email formatting in fields
+        email_val = email_val.replace('@', '.')
+        
+        soa_record = (
+            f"@   IN  SOA {ns1_val.rstrip('.')}. {email_val.rstrip('.')}. (\n"
+            f"            2026101201 ; Serial\n"
+            f"            3600       ; Refresh\n"
+            f"            1800       ; Retry\n"
+            f"            604800     ; Expire\n"
+            f"            86400      ; Minimum TTL\n"
+            f")\n"
+        )
+        injected_headers.append(soa_record)
+
+    # 4. Ask for Name Servers if not in file
     if not has_ns:
-        injected_headers.append(f"@   IN  NS  ns1.{origin_domain}.\n")
+        print("Zone file is missing NS records:")
+        ns1_val = input(f"Enter NS1 hostname [ns1.{origin_domain}]: ").strip()
+        if not ns1_val:
+            ns1_val = f"ns1.{origin_domain}"
+        injected_headers.append(f"@   IN  NS  {ns1_val.rstrip('.')}.\n")
+        
+        ns2_val = input("Enter NS2 hostname (Leave blank to skip/ignore): ").strip()
+        if ns2_val:
+            injected_headers.append(f"@   IN  NS  {ns2_val.rstrip('.')}.\n")
 
     complete_zone_text = "".join(injected_headers) + "".join(lines)
     return dns.zone.from_text(complete_zone_text, origin=origin_domain, relativize=False)
@@ -97,7 +145,7 @@ def convert_zone_to_csv(zone_file_path, csv_file_path):
                         content = content.replace('" "', '').replace('""', '')
                         if content.startswith('"') and content.endswith('"'):
                             content = content[1:-1]
-                        # Wraps inside standard triple-escaped quotes instead of backslashes
+                        # Exact panel-required wrapping style
                         content = f'"""{content}"""'
                     
                     if priority != "":
