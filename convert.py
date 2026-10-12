@@ -47,7 +47,6 @@ def preprocess_and_load_zone(zone_file_path):
         injected_headers.append(f"@   IN  NS  ns1.{origin_domain}.\n")
 
     complete_zone_text = "".join(injected_headers) + "".join(lines)
-    # Load with relativize=False so everything inside handles absolute names naturally
     return dns.zone.from_text(complete_zone_text, origin=origin_domain, relativize=False)
 
 def convert_zone_to_csv(zone_file_path, csv_file_path):
@@ -62,7 +61,6 @@ def convert_zone_to_csv(zone_file_path, csv_file_path):
     
     with open(csv_file_path, mode='w', encoding='utf-8') as csv_file:
         for name, node in zone.nodes.items():
-            # Convert node names relative to the origin name string context
             name_str = name.relativize(zone.origin).to_text()
             if name_str == "@" or name_str == "":
                 name_str = "@"
@@ -74,8 +72,6 @@ def convert_zone_to_csv(zone_file_path, csv_file_path):
                     continue
                 
                 for rdata in rdataset:
-                    # FIX: Pass zone.origin (the name object) instead of the zone object itself
-                    # Setting relativize=False ensures the targets stay full (e.g. ://maahmad.com.)
                     content = rdata.to_text(origin=zone.origin, relativize=False)
                     priority = ""
                     
@@ -85,24 +81,24 @@ def convert_zone_to_csv(zone_file_path, csv_file_path):
                             priority = parts[0]
                             weight = parts[1]
                             port = parts[2]
-                            target = parts[3].rstrip('.') # Clear trailing dot for panel validation
+                            target = parts[3].rstrip('.')
                             content = f"{weight} {port} {target}"
                     
                     elif rdtype == 'MX':
                         parts = content.split(' ', 1)
                         if len(parts) == 2:
                             priority = parts[0]
-                            content = parts[1].rstrip('.') # Clear trailing dot for panel validation
+                            content = parts[1].rstrip('.')
                             
                     elif rdtype == 'CNAME':
-                        content = content.rstrip('.') # Clear trailing dot for panel validation
+                        content = content.rstrip('.')
                         
                     elif rdtype == 'TXT':
                         content = content.replace('" "', '').replace('""', '')
                         if content.startswith('"') and content.endswith('"'):
                             content = content[1:-1]
-                        # Exact panel-required wrapping style: " \"content\" "
-                        content = f'"\\"{content}\\""'
+                        # Wraps inside standard triple-escaped quotes instead of backslashes
+                        content = f'"""{content}"""'
                     
                     if priority != "":
                         csv_file.write(f"{name_str},{rdtype},{content},{priority}\n")
