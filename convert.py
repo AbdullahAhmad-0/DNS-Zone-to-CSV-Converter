@@ -57,34 +57,22 @@ def preprocess_and_load_zone(zone_file_path):
             ttl_input = "3600"
         injected_headers.append(f"$TTL {ttl_input}\n")
 
-    # Helper function to append a trailing dot only if it's a completely absolute domain name
-    def format_absolute_host(hostname, fallback_sub, domain):
-        hostname = hostname.strip()
-        if not hostname:
-            return f"{fallback_sub}.{domain}."
-        # If it already contains a dot and doesn't end with one, treat it as an external absolute domain
-        if '.' in hostname and not hostname.endswith('.'):
-            return f"{hostname}."
-        elif not hostname.endswith('.'):
-            return f"{hostname}."
-        return hostname
-
     # 3. Ask for SOA components if not in file
     if not has_soa:
         print("Zone file is missing an SOA record. Let's build it dynamically:")
-        ns1_input = input(f"Enter Primary Name Server [ns1.{origin_domain}]: ").strip()
-        ns1_val = format_absolute_host(ns1_input, "ns1", origin_domain)
+        ns1_val = input(f"Enter Primary Name Server [ns1.{origin_domain}]: ").strip()
+        if not ns1_val:
+            ns1_val = f"ns1.{origin_domain}"
             
         email_val = input(f"Enter Hostmaster Email [postmaster.{origin_domain}]: ").strip()
         if not email_val:
-            email_val = f"postmaster.{origin_domain}."
-        else:
-            email_val = email_val.replace('@', '.')
-            if not email_val.endswith('.'):
-                email_val += '.'
+            email_val = f"postmaster.{origin_domain}"
+            
+        # Standardize periods for email formatting in fields
+        email_val = email_val.replace('@', '.')
         
         soa_record = (
-            f"@   IN  SOA {ns1_val} {email_val} (\n"
+            f"@   IN  SOA {ns1_val.rstrip('.')}. {email_val.rstrip('.')}. (\n"
             f"            2026101201 ; Serial\n"
             f"            3600       ; Refresh\n"
             f"            1800       ; Retry\n"
@@ -97,15 +85,14 @@ def preprocess_and_load_zone(zone_file_path):
     # 4. Ask for Name Servers if not in file
     if not has_ns:
         print("Zone file is missing NS records:")
-        if 'ns1_val' not in locals():
-            ns1_input = input(f"Enter NS1 hostname [ns1.{origin_domain}]: ").strip()
-            ns1_val = format_absolute_host(ns1_input, "ns1", origin_domain)
-        injected_headers.append(f"@   IN  NS  {ns1_val}\n")
+        ns1_val = input(f"Enter NS1 hostname [ns1.{origin_domain}]: ").strip()
+        if not ns1_val:
+            ns1_val = f"ns1.{origin_domain}"
+        injected_headers.append(f"@   IN  NS  {ns1_val.rstrip('.')}.\n")
         
-        ns2_input = input("Enter NS2 hostname (Leave blank to skip/ignore): ").strip()
-        if ns2_input:
-            ns2_val = format_absolute_host(ns2_input, "ns2", origin_domain)
-            injected_headers.append(f"@   IN  NS  {ns2_val}\n")
+        ns2_val = input("Enter NS2 hostname (Leave blank to skip/ignore): ").strip()
+        if ns2_val:
+            injected_headers.append(f"@   IN  NS  {ns2_val.rstrip('.')}.\n")
 
     complete_zone_text = "".join(injected_headers) + "".join(lines)
     return dns.zone.from_text(complete_zone_text, origin=origin_domain, relativize=False)
@@ -158,6 +145,7 @@ def convert_zone_to_csv(zone_file_path, csv_file_path):
                         content = content.replace('" "', '').replace('""', '')
                         if content.startswith('"') and content.endswith('"'):
                             content = content[1:-1]
+                        # Exact panel-required wrapping style
                         content = f'"""{content}"""'
                     
                     if priority != "":
